@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="NLog" Version="5.3.2" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\CorrelationContext.cs" Link="Infrastructure\CorrelationContext.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\CorrelationHttpHandler.cs" Link="Infrastructure\CorrelationHttpHandler.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\ExternalItemGateway.cs" Link="Infrastructure\ExternalItemGateway.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\IPerformanceTracker.cs" Link="Infrastructure\IPerformanceTracker.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\IItemProcessingService.cs" Link="Infrastructure\IItemProcessingService.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\IItemRepository.cs" Link="Infrastructure\IItemRepository.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\IUnitOfWork.cs" Link="Infrastructure\IUnitOfWork.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\IExternalItemGateway.cs" Link="Infrastructure\IExternalItemGateway.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\ItemProcessingService.cs" Link="Infrastructure\ItemProcessingService.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\ItemRepository.cs" Link="Infrastructure\ItemRepository.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\PerformanceLogger.cs" Link="Infrastructure\PerformanceLogger.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\PerformanceScope.cs" Link="Infrastructure\PerformanceScope.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\PerformanceTracker.cs" Link="Infrastructure\PerformanceTracker.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\TimingMeasurement.cs" Link="Infrastructure\TimingMeasurement.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Infrastructure\UnitOfWork.cs" Link="Infrastructure\UnitOfWork.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Models\ItemRequest.cs" Link="Models\ItemRequest.cs" />
+    <Compile Include="..\..\src\SamplePerformance\Models\ItemResponse.cs" Link="Models\ItemResponse.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>
