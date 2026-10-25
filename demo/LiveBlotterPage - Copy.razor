@@ -1,0 +1,274 @@
+@page "/requests/live"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using EQMX.MarketDataService.Repository.Data
+@using Microsoft.AspNetCore.Components.Authorization
+@using Puma.MDE.Trader.WebUI.Components.Pages.LatestRequests
+@using Puma.MDE.Trader.WebUI.Components.Shared
+@using Puma.MDE.Trader.WebUI.Services
+@using Puma.MDE.Trader.WebUI.Services.Data
+@using Puma.MDE.Trader.WebUI.Utils
+@inject IPubRequestCache Cache
+@inject IPubRequestRepository PubRequestRepo
+@inject InstrumentSelectionState SelectionState
+@inject LiveRequestsViewState ViewState
+@implements IDisposable
+
+<PageTitle>MDE Explorer - Live Publication Blotter</PageTitle>
+
+<div class="d-flex flex-column gap-3">
+    <!-- Main Area Page Header -->
+    <div class="d-flex justify-content-between align-items-center pb-1">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h1 class="page-main-heading mb-0">Live Publication Blotter</h1>
+                <span class="page-target-pill">TARGET: MUREX</span>
+                <span class="live-pill-header">REAL-TIME STREAM</span>
+            </div>
+            <div class="page-main-subheading">In-memory cached stream of today's MUREX market data publishing activity</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge-distribution-engine">
+                <span class="distribution-dot"></span>
+                DISTRIBUTION ENGINE
+            </span>
+        </div>
+    </div>
+
+    <!-- Selected Instrument Banner (Triggered by Header Dynamic Search) -->
+    <SelectedInstrumentBanner Instrument="@selectedDbInstrument" OnClear="@ClearDbSelection" />
+
+    <!-- Top KPI Summary Cards Row for MUREX Requests -->
+    <PubRequestKpiBar Requests="@filteredRequests" 
+                      PageSize="@filterCriteria.PageSize"
+                      Target="MUREX"
+                      ScopeDescription="@(filterCriteria.SeeMineOnly ? "My Requests" : (string.IsNullOrWhiteSpace(filterCriteria.SpecificUserName) ? "All Users" : filterCriteria.SpecificUserName))" />
+
+    <!-- Live Filter Toolbar (1h, 2h, 4h, 8h, Today) -->
+    <PubRequestFilterBar Criteria="@filterCriteria" 
+                         Mode="PubRequestFilterBar.BlotterMode.Live"
+                         AvailableTypes="@availableTypes" 
+                         AvailableStatuses="@availableStatuses" 
+                         OnFilterChanged="@HandleFilterChanged" />
+
+    <!-- Live Stream Status Bar & UI Refresh Feedback -->
+    <div class="d-flex justify-content-between align-items-center px-1">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fw-bold" style="font-size: 12px; color: var(--text-primary); letter-spacing: 0.02em;">PUBLICATION STREAM</span>
+
+            @if (autoRefreshEnabled)
+            {
+                <span class="live-badge-pill d-inline-flex align-items-center gap-1 px-2 py-0.5 rounded-pill" title="Auto-refreshing on cache updates">
+                    <span class="live-pulse-dot"></span>
+                    <span style="font-size: 10px; font-weight: 700; color: #28a745; letter-spacing: 0.05em;">LIVE (10s POLL)</span>
+                </span>
+            }
+            else
+            {
+                <span class="paused-badge-pill d-inline-flex align-items-center gap-1 px-2 py-0.5 rounded-pill" title="Auto-refresh paused">
+                    <span style="font-size: 10px; font-weight: 600; color: var(--text-muted);">PAUSED</span>
+                </span>
+            }
+
+            @if (!Cache.IsInitialized)
+            {
+                <span class="refreshing-pill d-inline-flex align-items-center gap-1 px-2 py-0.5 rounded-pill">
+                    <span class="spinner-border spinner-border-sm" style="width: 10px; height: 10px; border-width: 2px; color: #007A91;" role="status"></span>
+                    <span style="font-size: 10px; font-weight: 600; color: #007A91;">Initializing cache...</span>
+                </span>
+            }
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted tabular-nums" style="font-size: 11px;">
+                Last cache update: <strong style="color: var(--text-primary);">@(Cache.LastUpdatedAt > DateTime.MinValue ? Cache.LastUpdatedAt.ToString("HH:mm:ss") : "—") CET</strong>
+            </span>
+
+            <button type="button" 
+                    class="btn-live-control shadow-sm"
+                    @onclick="ToggleAutoRefresh"
+                    title="@(autoRefreshEnabled ? "Pause automatic cache update listening" : "Resume automatic cache update listening")">
+                @(autoRefreshEnabled ? "⏸ Pause" : "▶ Resume")
+            </button>
+
+            <button type="button" 
+                    class="btn-live-control shadow-sm d-flex align-items-center gap-1"
+                    @onclick="ManualRefresh"
+                    title="Re-apply filters on cache now">
+                <i class="ui-icon ui-icon-refresh"></i>
+                <span>Refresh</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Latest Requests DataGrid with Page-by-Page Navigation -->
+    <RequestGrid Requests="@filteredRequests" 
+                 PageSize="@filterCriteria.PageSize"
+                 InitialPage="@ViewState.CurrentPage"
+                 OnPageChanged="@HandlePageChanged"
+                 IsLoading="@(!Cache.IsInitialized)" />
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private LivePubRequestFilterCriteria filterCriteria = new();
+    private IReadOnlyList<PubRequestSummary> filteredRequests = Array.Empty<PubRequestSummary>();
+    private IReadOnlyList<string> availableTypes = Array.Empty<string>();
+    private IReadOnlyList<string> availableStatuses = Array.Empty<string>();
+
+    private EQMXStorageInstrument? selectedDbInstrument;
+    private bool autoRefreshEnabled = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        SelectionState.OnInstrumentSelected += HandleDbInstrumentSelected;
+        selectedDbInstrument = SelectionState.SelectedInstrument;
+
+        filterCriteria = ViewState.Criteria;
+        autoRefreshEnabled = ViewState.AutoRefreshEnabled;
+
+        if (AuthStateTask != null)
+        {
+            var authState = await AuthStateTask;
+            if (authState.User.Identity?.IsAuthenticated == true)
+            {
+                if (string.IsNullOrEmpty(filterCriteria.CurrentUserName))
+                {
+                    filterCriteria.CurrentUserName = authState.User.Identity.Name;
+                }
+                filterCriteria.IsTechnicalUser = authState.User.IsInRole("TechnicalUser");
+            }
+        }
+
+        try
+        {
+            availableTypes = await PubRequestRepo.GetDistinctMarketDataTypesAsync();
+            availableStatuses = await PubRequestRepo.GetDistinctStatusesAsync();
+        }
+        catch
+        {
+            // Fallback handled in repository
+        }
+
+        ApplyInMemoryFilters();
+        Cache.OnRequestsUpdated += HandleCacheUpdated;
+    }
+
+    private void HandleCacheUpdated()
+    {
+        if (autoRefreshEnabled)
+        {
+            _ = InvokeAsync(() =>
+            {
+                ApplyInMemoryFilters();
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void ApplyInMemoryFilters()
+    {
+        var allCached = Cache.GetAllTodayRequests();
+        IEnumerable<PubRequestSummary> query = allCached;
+
+        // 1. Date Filter (1h, 2h, 4h, 8h, Today)
+        var cutoff = filterCriteria.GetCutoffTime();
+        if (cutoff.HasValue)
+        {
+            query = query.Where(r => r.EnqueuedAt >= cutoff.Value);
+        }
+
+        // 2. Username Filter
+        if (filterCriteria.SeeMineOnly && !string.IsNullOrWhiteSpace(filterCriteria.CurrentUserName))
+        {
+            query = query.Where(r => UserIdentityHelper.IsUserMatch(r.UserName, filterCriteria.CurrentUserName));
+        }
+        else if (!filterCriteria.SeeMineOnly && !string.IsNullOrWhiteSpace(filterCriteria.SpecificUserName))
+        {
+            var userFilter = filterCriteria.SpecificUserName.Trim();
+            query = query.Where(r => r.UserName != null && (
+                r.UserName.Contains(userFilter, StringComparison.OrdinalIgnoreCase) ||
+                UserIdentityHelper.ExtractBareUsername(r.UserName).Contains(userFilter, StringComparison.OrdinalIgnoreCase)
+            ));
+        }
+
+        // 3. Underlying Filter
+        if (!string.IsNullOrWhiteSpace(filterCriteria.Underlying))
+        {
+            var underFilter = filterCriteria.Underlying.Trim();
+            query = query.Where(r => r.MarketDataKey != null && r.MarketDataKey.Contains(underFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 4. Market Data Type Filter
+        if (!string.IsNullOrWhiteSpace(filterCriteria.MarketDataType) && !string.Equals(filterCriteria.MarketDataType, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(r => string.Equals(r.MarketDataType, filterCriteria.MarketDataType.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 5. Status Filter
+        if (!string.IsNullOrWhiteSpace(filterCriteria.Status) && !string.Equals(filterCriteria.Status, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(r => string.Equals(r.Status, filterCriteria.Status.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        filteredRequests = query.ToList();
+    }
+
+    private void HandleFilterChanged()
+    {
+        ViewState.Criteria = filterCriteria;
+        ViewState.CurrentPage = 1;
+        ApplyInMemoryFilters();
+        StateHasChanged();
+    }
+
+    private void HandlePageChanged(int newPage)
+    {
+        ViewState.CurrentPage = newPage;
+    }
+
+    private void ToggleAutoRefresh()
+    {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        ViewState.AutoRefreshEnabled = autoRefreshEnabled;
+        if (autoRefreshEnabled)
+        {
+            ApplyInMemoryFilters();
+            StateHasChanged();
+        }
+    }
+
+    private void ManualRefresh()
+    {
+        ApplyInMemoryFilters();
+        StateHasChanged();
+    }
+
+    private void HandleDbInstrumentSelected(EQMXStorageInstrument? instrument)
+    {
+        selectedDbInstrument = instrument;
+        filterCriteria.Underlying = instrument?.Reference;
+        ViewState.Criteria.Underlying = instrument?.Reference;
+        ViewState.CurrentPage = 1;
+        ApplyInMemoryFilters();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void ClearDbSelection()
+    {
+        selectedDbInstrument = null;
+        filterCriteria.Underlying = null;
+        ViewState.Criteria.Underlying = null;
+        SelectionState.ClearSelection();
+        ApplyInMemoryFilters();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        Cache.OnRequestsUpdated -= HandleCacheUpdated;
+        SelectionState.OnInstrumentSelected -= HandleDbInstrumentSelected;
+    }
+}

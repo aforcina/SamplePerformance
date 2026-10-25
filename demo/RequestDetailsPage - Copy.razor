@@ -1,0 +1,296 @@
+@page "/requests/{Id:long}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Puma.MDE.Trader.WebUI.Components.Shared
+@using Puma.MDE.Trader.WebUI.Services
+@using Puma.MDE.Trader.WebUI.Services.Data
+@using System.Net
+@using System.Text.RegularExpressions
+@inject IPubRequestRepository PubRequestRepo
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Request #@Id</PageTitle>
+
+<div class="d-flex flex-column gap-3">
+    <!-- Top Action Breadcrumb Bar -->
+// Omitted... back button
+    @if (isLoading)
+    {
+        <div class="trader-card p-5 text-center">
+            <div class="spinner-border text-teal mb-3" style="width: 2.5rem; height: 2.5rem; color: #007A91;" role="status"></div>
+            <div class="fs-6 fw-semibold" style="color: var(--text-primary);">Loading publication details for Request #@Id...</div>
+            <div class="text-muted" style="font-size: 11px;">Querying payload, message logs, and attempts</div>
+        </div>
+    }
+    else if (errorMessage != null)
+    {
+        <div class="alert alert-danger p-3 shadow-sm" role="alert">
+            <h5 class="alert-heading fs-6 fw-bold mb-1">Failed to Load Request Details</h5>
+            <p class="mb-0" style="font-size: 12px;">@errorMessage</p>
+        </div>
+    }
+    else if (detail == null)
+    {
+        <div class="trader-card p-5 text-center">
+            <div class="fs-5 fw-bold mb-2" style="color: var(--text-primary);">Request #@Id Not Found</div>
+            <div class="text-muted mb-3" style="font-size: 12px;">The requested publication ID could not be found in the database.</div>
+            <button class="btn-solid-teal" @onclick="NavigateBack">Return to Requests</button>
+        </div>
+    }
+    else
+    {
+        <!-- Header Summary Card -->
+        <div class="trader-card p-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 border-bottom pb-3 mb-3" style="border-color: var(--border-subtle) !important;">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="fs-4 fw-bold" style="color: var(--text-primary);">Request #@detail.Id</span>
+                    <StatusBadge Status="@detail.Status" />
+                    @if (!string.IsNullOrEmpty(detail.MarketDataKey))
+                    {
+                        <span class="trader-badge" style="background-color: var(--uc-teal-soft, rgba(0, 122, 145, 0.20)); color: var(--teal-accent, #007A91); font-size: 13px; font-weight: 700;">
+                            @detail.MarketDataKey
+                        </span>
+                    }
+                    @if (!string.IsNullOrEmpty(detail.MarketDataType))
+                    {
+                        <span class="badge" style="background-color: var(--bg-surface-elevated); color: var(--text-secondary); border: 1px solid var(--border-subtle); font-size: 11px;">
+                            @detail.MarketDataType
+                        </span>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted" style="font-size: 11px;">Target:</span>
+                    <span class="fw-bold" style="color: var(--text-primary); font-size: 11px;">MUREX</span>
+                </div>
+            </div>
+
+            <!-- Metadata Key-Value Grid -->
+            <div class="row g-3">
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Enqueued By User</label>
+                        <div class="value fw-semibold">@(detail.UserName ?? "—")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Enqueued At (Start)</label>
+                        <div class="value tabular-nums">@detail.EnqueuedAt.ToString("yyyy-MM-dd HH:mm:ss")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Finalized At (Finish)</label>
+                        <div class="value tabular-nums">@(detail.FinalizedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "In Progress")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Processing Duration</label>
+                        <div class="value tabular-nums">@detail.DurationFormatted</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Claimed By Worker</label>
+                        <div class="value">@(detail.ClaimedBy ?? "—")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Payload Format</label>
+                        <div class="value">@(detail.RequestFormat ?? "—")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Market Data Key</label>
+                        <div class="value fw-bold text-teal">@(detail.MarketDataKey ?? "—")</div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <div class="meta-field">
+                        <label>Publication Status</label>
+                        <div class="value">@detail.Status</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- HIGH-EMPHASIS USER FRIENDLY ERROR BANNER -->
+        @if (IsFailureStatus || !string.IsNullOrWhiteSpace(detail.ErrorMessage))
+        {
+            <div class="error-banner-card p-4 shadow-sm">
+                <div class="d-flex align-items-start gap-3">
+                    <div class="error-icon-box flex-shrink-0">
+                        ⚠
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="error-banner-title">USER-FRIENDLY ERROR SUMMARY</span>
+                            <span class="badge bg-danger text-white uppercase" style="font-size: 10px;">ACTION REQUIRED</span>
+                        </div>
+                        <div class="error-banner-message">
+                            @detail.UserFriendlyError
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (IsSuccessStatus)
+        {
+            <div class="success-banner-card p-3 shadow-sm">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="fs-4" style="color: #28a745;">✓</span>
+                    <div>
+                        <span class="fw-bold" style="color: #28a745; font-size: 12px;">PUBLICATION SUCCESSFUL</span>
+                        <div style="font-size: 11px; color: var(--text-secondary);">@detail.UserFriendlyError</div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Input Payload Section (Read-Only Grid Visualization) -->
+        <CsvPayloadViewer CsvContent="@detail.RequestContent" Format="@detail.RequestFormat" />
+
+        <!-- Technical Diagnostics & Logs (Collapsible Accordion) -->
+        <div class="trader-card p-0 overflow-hidden">
+            <div class="px-4 py-3 d-flex justify-content-between align-items-center border-bottom" style="background-color: var(--bg-surface-elevated); border-color: var(--border-subtle) !important;">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fw-bold" style="font-size: 12px; color: var(--text-primary);">Technical Diagnostics & Message Logs</span>
+                    @if (!string.IsNullOrEmpty(detail.ErrorMessage))
+                    {
+                        <span class="badge bg-danger text-white" style="font-size: 10px;">Error Logged</span>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    @if (!string.IsNullOrEmpty(detail.ErrorMessage))
+                    {
+                        <button type="button" 
+                                class="btn-copy-payload shadow-sm"
+                                @onclick="CopyTechnicalTrace">
+                            @if (copiedTrace)
+                            {
+                                <span class="text-success"><i class="ui-icon ui-icon-check me-1"></i>Trace Copied</span>
+                            }
+                            else
+                            {
+                                <span><i class="ui-icon ui-icon-copy me-1"></i>Copy Raw Trace</span>
+                            }
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="p-4 d-flex flex-column gap-3">
+                <!-- Technical Error Details -->
+                <div>
+                    <label class="meta-field-label mb-1">Raw Technical Error Message (eqmx_pub_message_attempt.error_message)</label>
+                    @if (string.IsNullOrWhiteSpace(detail.ErrorMessage))
+                    {
+                        <div class="p-2 border rounded" style="background-color: var(--bg-surface-elevated); border-color: var(--border-subtle); color: var(--text-muted); font-size: 11px;">
+                            No technical errors recorded.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="tech-error-box p-3">
+                            <pre class="mb-0" style="font-size: 11px; white-space: pre-wrap; word-break: break-all; font-family: Consolas, monospace; color: #ff6b6b;">@detail.ErrorMessage</pre>
+                        </div>
+                    }
+                </div>
+
+                <!-- Response Message -->
+                <div>
+                    <label class="meta-field-label mb-1">Response Message</label>
+                    <JsonViewer JsonContent="@detail.ResponseContent" 
+                                Title="Response Message" 
+                                Format="@detail.ResponseFormat" />
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private PubRequestDetail? detail;
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    private bool copiedRequestId;
+    private bool copiedTrace;
+
+    private bool IsFailureStatus => detail != null && (string.Equals(detail.Status, "FAILED", StringComparison.OrdinalIgnoreCase) || 
+                                                       string.Equals(detail.Status, "ERROR", StringComparison.OrdinalIgnoreCase));
+
+    private bool IsSuccessStatus => detail != null && (string.Equals(detail.Status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) || 
+                                                       string.Equals(detail.Status, "DONE", StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadDetailsAsync();
+    }
+
+    private async Task LoadDetailsAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            detail = await PubRequestRepo.GetRequestDetailsByIdAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateBack()
+    {
+        NavigationManager.NavigateTo("requests/live");
+    }
+
+    private async Task CopyRequestId()
+    {
+        await JSRuntime.InvokeVoidAsync("copyToClipboard", Id.ToString());
+        copiedRequestId = true;
+        StateHasChanged();
+        await Task.Delay(2000);
+        copiedRequestId = false;
+        StateHasChanged();
+    }
+
+    private async Task CopyTechnicalTrace()
+    {
+        if (detail?.ErrorMessage != null)
+        {
+            await JSRuntime.InvokeVoidAsync("copyToClipboard", detail.ErrorMessage);
+            copiedTrace = true;
+            StateHasChanged();
+            await Task.Delay(2000);
+            copiedTrace = false;
+            StateHasChanged();
+        }
+    }
+}
